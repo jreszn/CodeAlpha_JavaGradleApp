@@ -11,6 +11,10 @@ A Java 21 web service built with Gradle 9.9.1, packaged with a multi-stage Docke
 - Runs as a non-root user inside the container
 - Docker HEALTHCHECK that polls `/health` every 30 seconds
 
+## Architecture
+
+![Architecture diagram](docs/images/architecture.png)
+
 ## Endpoints
 
 | Method | Path       | Response                                  | Content-Type                     |
