@@ -1,169 +1,186 @@
-# CodeAlpha_JavaGradleApp
+# CodeAlpha Java Gradle App
 
-A Java 21 web service built with Gradle 9.9.1, packaged into a multi-stage Docker image, monitored with a health endpoint, and deployed to Azure through a GitHub Actions CI/CD pipeline. Built for the CodeAlpha DevOps internship (Task 1: CI/CD with Azure, Task 3: Java with Gradle, Task 4: Web server with Docker).
+A Java 21 HTTP web service built with Gradle 9.9.1. The project includes JUnit 5 tests, a multi-stage Docker image, a `/health` endpoint, and a GitHub Actions workflow for deploying to Azure.
 
 ## Architecture
 
-![Architecture of the CodeAlpha DevOps pipeline](docs/architecture.png)
+![Architecture of the CodeAlpha DevOps pipeline](docs/images/architecture.png)
 
-A push to `main` triggers GitHub Actions. The workflow logs in to Azure with OpenID Connect (no stored client secret), builds and tests the Gradle project, pushes the Docker image to Azure Container Registry, and deploys it to the Azure Web App. The web app pulls the image with its managed identity.
+A push to `main` triggers GitHub Actions to build and test the application, authenticate to Azure using OpenID Connect (OIDC), build and push a Docker image to Azure Container Registry (ACR), and deploy that image to Azure Web App.
 
 ## Features
 
-- Java 21 application using the JDK's built-in HTTP server (no framework)
-- Gradle Wrapper pinned to 9.9.1, so every build uses the same tool version
-- JUnit 5 unit tests run on every build
-- Multi-stage Dockerfile: build stage with Gradle, small runtime stage with a JRE
-- Runs as a non-root user inside the container
-- Docker HEALTHCHECK that polls `/health` every 30 seconds
-- GitHub Actions pipeline: build, test, push to ACR, deploy to Azure Web App
-- Passwordless deployment: OIDC federated credential for GitHub, managed identity for the web app's image pull
+- Java 21 application using the JDK's built-in HTTP server (no web framework).
+- Gradle Wrapper pinned to 9.9.1; a separate Gradle installation is not required.
+- JUnit 5 tests run as part of the build.
+- Multi-stage Docker build with a JRE-based runtime image.
+- Container runs as a non-root user and has a Docker health check.
+- GitHub Actions pipeline builds, tests, pushes to ACR, and deploys to Azure Web App.
+- Passwordless Azure pipeline authentication with OIDC; the web app uses a managed identity to pull the image.
 
 ## Endpoints
 
-| Method | Path      | Response           | Content-Type                      |
-|--------|-----------|--------------------|-----------------------------------|
-| GET    | `/`       | `Hello World!`     | `text/plain; charset=utf-8`       |
-| GET    | `/health` | `{"status":"UP"}`  | `application/json; charset=utf-8` |
+| Method | Path      | Response          | Content type                      |
+|:------:|-----------|-------------------|-----------------------------------|
+| `GET`  | `/`       | `Hello World!`    | `text/plain; charset=utf-8`        |
+| `GET`  | `/health` | `{"status":"UP"}` | `application/json; charset=utf-8` |
 
-Live deployment: `https://codealpha-java-app-2026-a5cjfta7dqfga7dr.westus3-01.azurewebsites.net/`
+**Live app:** [Open the web app](https://codealpha-java-app-2026-a5cjfta7dqfga7dr.westus3-01.azurewebsites.net/)
+
+**Health check:** [Open `/health`](https://codealpha-java-app-2026-a5cjfta7dqfga7dr.westus3-01.azurewebsites.net/health)
 
 ## Prerequisites
 
-- Docker Engine (or Docker Desktop)
-- A GitHub account for the Actions pipeline
-- An Azure subscription (for the cloud deployment only)
-- JDK 21 only if you want to run without Docker
-- No Gradle install needed: the wrapper downloads the right version
+- Docker Engine or Docker Desktop to build and run the container.
+- JDK 21 only if running the application directly without Docker.
+- A GitHub account and an Azure subscription to use the deployment pipeline.
 
 ## Build and test
 
 ```bash
 ./gradlew build
+```
 
-This compiles the code, runs the JUnit tests, and produces the packaged app under app/build/install/app/.
+This compiles the project, runs the tests, and creates the application distribution under `app/build/install/app/`.
 
-Run locally (without Docker)
+## Run locally
 
+With JDK 21 installed:
+
+```bash
 ./gradlew run
+```
 
-The server listens on port 8080. Override it with the PORT environment variable:
+The server listens on port `8080` by default. Set `PORT` to use another port:
 
+```bash
 PORT=9090 ./gradlew run
+```
 
-Build and run with Docker
+## Build and run with Docker
 
+```bash
 docker build -t codealpha-java-app:1.2 .
 docker run -d --name codealpha-web -p 8080:8080 codealpha-java-app:1.2
+```
 
-Check the health status and the endpoints:
+Check the container health and endpoints:
 
+```bash
 docker inspect --format='{{.State.Health.Status}}' codealpha-web
 curl -i http://localhost:8080/
 curl -i http://localhost:8080/health
+```
 
 Stop and remove the container:
 
+```bash
 docker stop codealpha-web && docker rm codealpha-web
+```
 
 ## CI/CD pipeline (Azure)
 
-The workflow lives in .github/workflows/azure-deploy.yml. It runs on every push to main and performs these steps:
+The workflow is [`.github/workflows/azure-deploy.yml`](.github/workflows/azure-deploy.yml). On every push to `main`, it:
 
-Checks out the code and sets up JDK 21 (Temurin).
-Runs ./gradlew build, which fails the pipeline if any test fails.
-Logs in to Azure with azure/login@v2 using OIDC. GitHub issues a short-lived token, and Azure trusts it through a federated credential, so no password or client secret is stored.
-Logs in to the registry with az acr login and builds the image.
-Tags the image with the commit SHA (github.sha), so each deployment is traceable and no image is overwritten.
-Pushes the image to codealphaacr1234.azurecr.io.
-Deploys the image to the Azure Web App with azure/webapps-deploy@v3.
+1. Checks out the repository and configures JDK 21 (Temurin).
+2. Runs `./gradlew build` and fails the workflow if the build or tests fail.
+3. Authenticates to Azure with `azure/login@v2` using OIDC.
+4. Logs in to ACR and builds the Docker image.
+5. Tags the image with the Git commit SHA and pushes it to `codealphaacr1234.azurecr.io`.
+6. Deploys that image to the Azure Web App.
 
-Azure resources
+### Azure resources
 
-Resource	Name	Region	Purpose
-Resource group	codealpha-devops-rg	East US	Holds all project resources
-Container registry	codealphaacr1234 (Basic)	East US	Stores Docker images
-App Service plan	plan-codealpha-linux (B1, Linux)	West US 3	Compute for the web app
-Web app	codealpha-java-app-2026	West US 3	Runs the container
-Entra app	codealpha-github-deploy	Tenant	Identity for the pipeline
+| Resource          | Name                       | Region    | Purpose                         |
+|-------------------|----------------------------|-----------|---------------------------------|
+| Resource group    | `codealpha-devops-rg`      | East US   | Holds project resources         |
+| Container registry| `codealphaacr1234` (Basic) | East US   | Stores Docker images            |
+| App Service plan  | `plan-codealpha-linux` (B1, Linux) | West US 3 | Hosts the web app                |
+| Web app           | `codealpha-java-app-2026`  | West US 3 | Runs the container              |
+| Entra app         | `codealpha-github-deploy`  | Tenant    | Pipeline identity               |
 
-Identities and roles
+### Identities and permissions
 
+| Identity                                      | Role         | Scope          | Purpose                              |
+|-----------------------------------------------|--------------|----------------|--------------------------------------|
+| `codealpha-github-deploy` service principal   | `AcrPush`     | Container registry | Pushes images                     |
+| `codealpha-github-deploy` service principal   | `Contributor` | Resource group | Updates the web app                 |
+| Web app system-assigned managed identity     | `AcrPull`     | Container registry | Pulls images without registry credentials |
 
+The ACR admin user is disabled. Configure these GitHub Actions repository secrets for Azure authentication:
 
-Identity	Role	Scope	Why
-codealpha-github-deploy (service principal)	AcrPush	Registry	Pipeline pushes images
-codealpha-github-deploy (service principal)	Contributor	Resource group	Pipeline updates the web app
-Web app system-assigned managed identity	AcrPull	Registry	Web app pulls images without credentials
+| Secret                 | Value                                      |
+|------------------------|--------------------------------------------|
+| `AZURE_CLIENT_ID`       | Application (client) ID of the Entra app   |
+| `AZURE_TENANT_ID`       | Directory (tenant) ID                      |
+| `AZURE_SUBSCRIPTION_ID` | Azure subscription ID                      |
 
-The registry's admin user is disabled. No secrets are stored for Azure: the repository secrets hold only the client ID, tenant ID and subscription ID, which are identifiers, not passwords.
-
-Federated credential
-
-The Entra app trusts tokens from this repository's main branch through a federated credential with the subject repo:jreszn/CodeAlpha_JavaGradleApp:ref:refs/heads/main. GitHub's token for the same branch can also carry the ID-based subject repo:jreszn@<owner-id>/CodeAlpha_JavaGradleApp@<repo-id>:ref:refs/heads/main, so the credential that matches that form is also registered. Both must match exactly, or Azure rejects the login with AADSTS700213.
-
-Required GitHub secrets
-
-
-
-Secret	Value
-AZURE_CLIENT_ID	Application (client) ID of codealpha-github-deploy
-AZURE_TENANT_ID	Directory (tenant) ID
-AZURE_SUBSCRIPTION_ID	Azure subscription ID
+The Entra app's federated credential must trust this repository and the `main` branch. The workflow does not use a stored Azure client secret.
 
 ## Screenshots
 
 ### Build and test
-![Gradle build](docs/screenshots/gradle-run.png)
+
+![Gradle build and test](docs/screenshots/gradle-run.jpg)
 
 ### Docker image and health check
-![Docker build](docs/screenshots/docker.png)
-![Container health](docs/screenshots/dockerps-inspect-stats.png)
 
-### CI/CD pipeline
-![GitHub Actions run](docs/screenshots/github-actions.png)
-![Container registry](docs/screenshots/acr-repository.png)
-![Web app on Azure](docs/screenshots/webapp-overview.png)
-![GitHub Secret](docs/screenshots/github-secret.png)
-![Federated-Credential](docs/screenshots/federated-credential.png)
+![Docker image build](docs/screenshots/docker.jpg)
 
-### Live endpoint
-![Live health check](docs/screenshots/live-health.png)
+![Container health and stats](docs/screenshots/dockerps-inspect-stats.jpg)
 
-Live endpoint: https://codealpha-java-app-2026-a5cjfta7dqfga7dr.westus3-01.azurewebsites.net/health
+### CI/CD pipeline and Azure
 
-## Versioning
+![GitHub Actions workflow run](docs/screenshots/github-action.jpg)
 
-Images are tagged with a version and never overwritten:
+![Azure Container Registry repository](docs/screenshots/acr-repository.jpg)
 
-1.0 initial web server
-1.1 added HEALTHCHECK
-1.2 /health returns application/json
+![Azure Web App overview](docs/screenshots/Webapp-overview.jpg)
 
-Pipeline images are tagged with the Git commit SHA.
+![GitHub Actions repository secret configuration](docs/screenshots/github-secret.jpg)
+
+![Azure federated credential](docs/screenshots/federated-credential.jpg)
+
+### Live health endpoint
+
+![Live health endpoint](docs/screenshots/live-health.jpg)
+
+## Image versions
+
+| Version | Change                         |
+|---------|--------------------------------|
+| `1.0`   | Initial web server              |
+| `1.1`   | Added Docker `HEALTHCHECK`      |
+| `1.2`   | `/health` returns JSON          |
+
+CI images are tagged with their Git commit SHA so deployments can be traced to a specific revision.
 
 ## Project structure
 
+```text
 .
 ├── .github/
 │   └── workflows/
-│       └── azure-deploy.yml   # CI/CD pipeline
+│       └── azure-deploy.yml
+├── app/
+│   ├── build.gradle
+│   └── src/
+│       ├── main/java/com/codealpha/app/App.java
+│       └── test/java/com/codealpha/app/AppTest.java
 ├── docs/
-│   ├── architecture.mmd       # architecture diagram source
-│   ├── architecture.png       # architecture diagram
-│   └── screenshots/           # evidence screenshots
-├── Dockerfile                 # multi-stage image build
-├── .dockerignore              # files excluded from the build context
-├── settings.gradle            # project name and modules
+│   ├── architecture.mmd
+│   ├── images/
+│   │   └── architecture.png
+│   └── screenshots/
 ├── gradle/
-│   ├── libs.versions.toml     # central dependency versions
-│   └── wrapper/               # pinned Gradle 9.9.1
-└── app/
-    ├── build.gradle           # Java toolchain, plugins, dependencies
-    └── src/
-        ├── main/java/com/codealpha/app/App.java
-        └── test/java/com/codealpha/app/AppTest.java
+│   ├── libs.versions.toml
+│   └── wrapper/
+├── .dockerignore
+├── Dockerfile
+├── gradlew
+└── settings.gradle
+```
 
 ## Author
 
-Adejare Oluwasegun Hassan (jreszn)
+Adejare Oluwasegun Hassan (`jreszn`)
