@@ -1,0 +1,40 @@
+flowchart LR
+    subgraph Dev["Developer - Windows + VS Code"]
+        code["Java source, Gradle files, Dockerfile"]
+    end
+
+    subgraph GH["GitHub - jreszn/CodeAlpha_JavaGradleApp"]
+        repo["Repository (main branch)"]
+        actions["GitHub Actions workflow<br/>azure-deploy.yml"]
+    end
+
+    subgraph Entra["Microsoft Entra ID"]
+        fed["Federated credential<br/>github-main-deploy-ids"]
+        sp["App: codealpha-github-deploy"]
+    end
+
+    subgraph Azure["Azure - codealpha-devops-rg"]
+        acr["Container Registry<br/>codealphaacr1234 - AcrPush / AcrPull"]
+        plan["App Service plan<br/>plan-codealpha-linux (B1, West US 3)"]
+        app["Web App<br/>codealpha-java-app-2026<br/>managed identity"]
+    end
+
+    subgraph VM["Local test - Ubuntu 22.04 VM (Vagrant)"]
+        gradle["Gradle 9.9.1 build and JUnit tests"]
+        docker["Docker Engine<br/>codealpha-web on port 8080"]
+    end
+
+    user["Browser / curl"]
+
+    code -->|git push| repo
+    repo -->|on push to main| actions
+    actions -->|OIDC token| fed
+    fed -->|trusted login| sp
+    actions -->|gradlew build| gradle
+    actions -->|docker build and push| acr
+    actions -->|deploy image| app
+    app -->|AcrPull via managed identity| acr
+    plan --- app
+    user -->|HTTPS /, /health| app
+    code -->|vagrant ssh and docker run| docker
+    docker -->|HEALTHCHECK /health| docker
