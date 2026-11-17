@@ -66,6 +66,51 @@ Stop and remove the container:
 
 docker stop codealpha-web && docker rm codealpha-web
 
+## CI/CD pipeline (Azure)
+
+The workflow lives in .github/workflows/azure-deploy.yml. It runs on every push to main and performs these steps:
+
+Checks out the code and sets up JDK 21 (Temurin).
+Runs ./gradlew build, which fails the pipeline if any test fails.
+Logs in to Azure with azure/login@v2 using OIDC. GitHub issues a short-lived token, and Azure trusts it through a federated credential, so no password or client secret is stored.
+Logs in to the registry with az acr login and builds the image.
+Tags the image with the commit SHA (github.sha), so each deployment is traceable and no image is overwritten.
+Pushes the image to codealphaacr1234.azurecr.io.
+Deploys the image to the Azure Web App with azure/webapps-deploy@v3.
+
+Azure resources
+
+Resource	Name	Region	Purpose
+Resource group	codealpha-devops-rg	East US	Holds all project resources
+Container registry	codealphaacr1234 (Basic)	East US	Stores Docker images
+App Service plan	plan-codealpha-linux (B1, Linux)	West US 3	Compute for the web app
+Web app	codealpha-java-app-2026	West US 3	Runs the container
+Entra app	codealpha-github-deploy	Tenant	Identity for the pipeline
+
+Identities and roles
+
+
+
+Identity	Role	Scope	Why
+codealpha-github-deploy (service principal)	AcrPush	Registry	Pipeline pushes images
+codealpha-github-deploy (service principal)	Contributor	Resource group	Pipeline updates the web app
+Web app system-assigned managed identity	AcrPull	Registry	Web app pulls images without credentials
+
+The registry's admin user is disabled. No secrets are stored for Azure: the repository secrets hold only the client ID, tenant ID and subscription ID, which are identifiers, not passwords.
+
+Federated credential
+
+The Entra app trusts tokens from this repository's main branch through a federated credential with the subject repo:jreszn/CodeAlpha_JavaGradleApp:ref:refs/heads/main. GitHub's token for the same branch can also carry the ID-based subject repo:jreszn@<owner-id>/CodeAlpha_JavaGradleApp@<repo-id>:ref:refs/heads/main, so the credential that matches that form is also registered. Both must match exactly, or Azure rejects the login with AADSTS700213.
+
+Required GitHub secrets
+
+
+
+Secret	Value
+AZURE_CLIENT_ID	Application (client) ID of codealpha-github-deploy
+AZURE_TENANT_ID	Directory (tenant) ID
+AZURE_SUBSCRIPTION_ID	Azure subscription ID
+
 ## Screenshots
 
 ### Build and test
@@ -79,51 +124,46 @@ docker stop codealpha-web && docker rm codealpha-web
 ![GitHub Actions run](docs/screenshots/github-actions.png)
 ![Container registry](docs/screenshots/acr-repository.png)
 ![Web app on Azure](docs/screenshots/webapp-overview.png)
-![GitHub Secret](docs/screenshots/github-secret)
-![Federated-Credential](docs/screenshots/federated-credential)
+![GitHub Secret](docs/screenshots/github-secret.png)
+![Federated-Credential](docs/screenshots/federated-credential.png)
 
 ### Live endpoint
 ![Live health check](docs/screenshots/live-health.png)
 
 Live endpoint: https://codealpha-java-app-2026-a5cjfta7dqfga7dr.westus3-01.azurewebsites.net/health
 
-TagChange
-1.0Initial HTTP server
-1.1Added HEALTHCHECK
-1.2/health returns application/json
+## Versioning
 
-Pipeline images are tagged with the Git commit SHA, so each deployment traces back to one commit.
+Images are tagged with a version and never overwritten:
 
-Troubleshooting notes
+1.0 initial web server
+1.1 added HEALTHCHECK
+1.2 /health returns application/json
 
+Pipeline images are tagged with the Git commit SHA.
 
+## Project structure
 
-SymptomCauseFix
-Address already in use on port 8080A previous run is still holding the portStop the process with pkill -f com.codealpha.app.App, or stop the container
-AADSTS530035 on az loginTenant Security Defaults block the sign-inKeep Security Defaults on and use the portal
-SubscriptionIsOverQuotaForSkuFree trial has zero B1 allowance in the regionCreate the plan in a region with allowance
-AADSTS700213 on the pipelineThe federated credential subject doesn't match the tokenAdd a credential whose subject equals the one in the error
-Pipeline login authority errorAn empty or malformed tenant or client ID secretRe-enter the values from the app's Overview page
-
-Project structure
 .
-├── .github/workflows/azure-deploy.yml   # CI/CD pipeline
-├── Dockerfile                           # multi-stage image build
-├── .dockerignore                        # files excluded from the build context
+├── .github/
+│   └── workflows/
+│       └── azure-deploy.yml   # CI/CD pipeline
 ├── docs/
-│   ├── architecture.mmd                 # architecture source
-│   ├── architecture.png                 # architecture diagram
-│   └── screenshots/                     # captured evidence
-├── settings.gradle                      # project name and modules
+│   ├── architecture.mmd       # architecture diagram source
+│   ├── architecture.png       # architecture diagram
+│   └── screenshots/           # evidence screenshots
+├── Dockerfile                 # multi-stage image build
+├── .dockerignore              # files excluded from the build context
+├── settings.gradle            # project name and modules
 ├── gradle/
-│   ├── libs.versions.toml               # central dependency versions
-│   └── wrapper/                         # pinned Gradle 9.9.1
+│   ├── libs.versions.toml     # central dependency versions
+│   └── wrapper/               # pinned Gradle 9.9.1
 └── app/
-    ├── build.gradle                     # Java toolchain, plugins, dependencies
+    ├── build.gradle           # Java toolchain, plugins, dependencies
     └── src/
         ├── main/java/com/codealpha/app/App.java
         └── test/java/com/codealpha/app/AppTest.java
 
-Author
-Adejare Oluwasegun Hassan
+## Author
 
+Adejare Oluwasegun Hassan (jreszn)
